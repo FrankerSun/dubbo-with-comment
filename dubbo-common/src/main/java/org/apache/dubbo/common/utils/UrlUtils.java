@@ -24,15 +24,30 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
+import static org.apache.dubbo.common.Constants.CATEGORY_KEY;
+import static org.apache.dubbo.common.Constants.CONFIGURATORS_CATEGORY;
+import static org.apache.dubbo.common.Constants.DEFAULT_CATEGORY;
+import static org.apache.dubbo.common.Constants.OVERRIDE_PROTOCOL;
+import static org.apache.dubbo.common.Constants.PROVIDERS_CATEGORY;
+import static org.apache.dubbo.common.Constants.ROUTERS_CATEGORY;
+import static org.apache.dubbo.common.Constants.ROUTE_PROTOCOL;
 
 public class UrlUtils {
+
+    /**
+     *  in the url string,mark the param begin
+     */
+    private final static String URL_PARAM_STARTING_SYMBOL = "?";
 
     public static URL parseURL(String address, Map<String, String> defaults) {
         if (address == null || address.length() == 0) {
             return null;
         }
         String url;
-        if (address.indexOf("://") >= 0) {
+        if (address.contains("://") || address.contains(URL_PARAM_STARTING_SYMBOL)) {
             url = address;
         } else {
             String[] addresses = Constants.COMMA_SPLIT_PATTERN.split(address);
@@ -45,7 +60,7 @@ public class UrlUtils {
                     }
                     backup.append(addresses[i]);
                 }
-                url += "?" + Constants.BACKUP_KEY + "=" + backup.toString();
+                url += URL_PARAM_STARTING_SYMBOL + Constants.BACKUP_KEY + "=" + backup.toString();
             }
         }
         String defaultProtocol = defaults == null ? null : defaults.get("protocol");
@@ -111,7 +126,7 @@ public class UrlUtils {
                 String defaultValue = entry.getValue();
                 if (defaultValue != null && defaultValue.length() > 0) {
                     String value = parameters.get(key);
-                    if (value == null || value.length() == 0) {
+                    if (StringUtils.isEmpty(value)) {
                         changed = true;
                         parameters.put(key, defaultValue);
                     }
@@ -303,7 +318,7 @@ public class UrlUtils {
 
     //compatible for dubbo-2.0.0
     public static List<String> revertForbid(List<String> forbid, Set<URL> subscribed) {
-        if (forbid != null && !forbid.isEmpty()) {
+        if (CollectionUtils.isNotEmpty(forbid)) {
             List<String> newForbid = new ArrayList<String>();
             for (String serviceName : forbid) {
                 if (!serviceName.contains(":") && !serviceName.contains("/")) {
@@ -335,15 +350,15 @@ public class UrlUtils {
             version = service.substring(i + 1);
             service = service.substring(0, i);
         }
-        return URL.valueOf(Constants.EMPTY_PROTOCOL + "://0.0.0.0/" + service + "?"
-                + Constants.CATEGORY_KEY + "=" + category
+        return URL.valueOf(Constants.EMPTY_PROTOCOL + "://0.0.0.0/" + service + URL_PARAM_STARTING_SYMBOL
+                + CATEGORY_KEY + "=" + category
                 + (group == null ? "" : "&" + Constants.GROUP_KEY + "=" + group)
                 + (version == null ? "" : "&" + Constants.VERSION_KEY + "=" + version));
     }
 
     public static boolean isMatchCategory(String category, String categories) {
         if (categories == null || categories.length() == 0) {
-            return Constants.DEFAULT_CATEGORY.equals(category);
+            return DEFAULT_CATEGORY.equals(category);
         } else if (categories.contains(Constants.ANY_VALUE)) {
             return true;
         } else if (categories.contains(Constants.REMOVE_VALUE_PREFIX)) {
@@ -356,11 +371,15 @@ public class UrlUtils {
     public static boolean isMatch(URL consumerUrl, URL providerUrl) {
         String consumerInterface = consumerUrl.getServiceInterface();
         String providerInterface = providerUrl.getServiceInterface();
-        if (!(Constants.ANY_VALUE.equals(consumerInterface) || StringUtils.isEquals(consumerInterface, providerInterface)))
+        //FIXME accept providerUrl with '*' as interface name, after carefully thought about all possible scenarios I think it's ok to add this condition.
+        if (!(Constants.ANY_VALUE.equals(consumerInterface)
+                || Constants.ANY_VALUE.equals(providerInterface)
+                || StringUtils.isEquals(consumerInterface, providerInterface))) {
             return false;
+        }
 
-        if (!isMatchCategory(providerUrl.getParameter(Constants.CATEGORY_KEY, Constants.DEFAULT_CATEGORY),
-                consumerUrl.getParameter(Constants.CATEGORY_KEY, Constants.DEFAULT_CATEGORY))) {
+        if (!isMatchCategory(providerUrl.getParameter(CATEGORY_KEY, DEFAULT_CATEGORY),
+                consumerUrl.getParameter(CATEGORY_KEY, DEFAULT_CATEGORY))) {
             return false;
         }
         if (!providerUrl.getParameter(Constants.ENABLED_KEY, true)
@@ -388,14 +407,15 @@ public class UrlUtils {
     }
 
     public static boolean isMatchGlobPattern(String pattern, String value) {
-        if ("*".equals(pattern))
+        if ("*".equals(pattern)) {
             return true;
-        if ((pattern == null || pattern.length() == 0)
-                && (value == null || value.length() == 0))
+        }
+        if (StringUtils.isEmpty(pattern) && StringUtils.isEmpty(value)) {
             return true;
-        if ((pattern == null || pattern.length() == 0)
-                || (value == null || value.length() == 0))
+        }
+        if (StringUtils.isEmpty(pattern) || StringUtils.isEmpty(value)) {
             return false;
+        }
 
         int i = pattern.lastIndexOf('*');
         // doesn't find "*"
@@ -425,6 +445,39 @@ public class UrlUtils {
                 value.getParameter(Constants.GROUP_KEY))
                 && isItemMatch(pattern.getParameter(Constants.VERSION_KEY),
                 value.getParameter(Constants.VERSION_KEY));
+    }
+
+    public static List<URL> classifyUrls(List<URL> urls, Predicate<URL> predicate) {
+        return urls.stream().filter(predicate).collect(Collectors.toList());
+    }
+
+    public static boolean isConfigurator(URL url) {
+        return OVERRIDE_PROTOCOL.equals(url.getProtocol()) ||
+                CONFIGURATORS_CATEGORY.equals(url.getParameter(CATEGORY_KEY, DEFAULT_CATEGORY));
+    }
+
+    public static boolean isRoute(URL url) {
+        return ROUTE_PROTOCOL.equals(url.getProtocol()) ||
+                ROUTERS_CATEGORY.equals(url.getParameter(CATEGORY_KEY, DEFAULT_CATEGORY));
+    }
+
+    public static boolean isProvider(URL url) {
+        return !OVERRIDE_PROTOCOL.equals(url.getProtocol()) &&
+                !ROUTE_PROTOCOL.equals(url.getProtocol()) &&
+                PROVIDERS_CATEGORY.equals(url.getParameter(CATEGORY_KEY, PROVIDERS_CATEGORY));
+    }
+
+    public static int getHeartbeat(URL url) {
+        return url.getParameter(Constants.HEARTBEAT_KEY, Constants.DEFAULT_HEARTBEAT);
+    }
+
+    public static int getIdleTimeout(URL url) {
+        int heartBeat = getHeartbeat(url);
+        int idleTimeout = url.getParameter(Constants.HEARTBEAT_TIMEOUT_KEY, heartBeat * 3);
+        if (idleTimeout < heartBeat * 2) {
+            throw new IllegalStateException("idleTimeout < heartbeatInterval * 2");
+        }
+        return idleTimeout;
     }
 
     /**

@@ -21,44 +21,51 @@ import org.apache.dubbo.rpc.Invocation;
 import org.apache.dubbo.rpc.Invoker;
 
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * random load balance.
- *
  */
 public class RandomLoadBalance extends AbstractLoadBalance {
 
     public static final String NAME = "random";
 
-    private final Random random = new Random();
-
     @Override
     protected <T> Invoker<T> doSelect(List<Invoker<T>> invokers, URL url, Invocation invocation) {
-        int length = invokers.size(); // Number of invokers
-        int totalWeight = 0; // The sum of weights
-        boolean sameWeight = true; // Every invoker has the same weight?
-        for (int i = 0; i < length; i++) {
+        // Number of invokers
+        int length = invokers.size();
+        // Every invoker has the same weight?
+        boolean sameWeight = true;
+        // the weight of every invokers
+        int[] weights = new int[length];
+        // the first invoker's weight
+        int firstWeight = getWeight(invokers.get(0), invocation);
+        weights[0] = firstWeight;
+        // The sum of weights
+        int totalWeight = firstWeight;
+        for (int i = 1; i < length; i++) {
             int weight = getWeight(invokers.get(i), invocation);
-            totalWeight += weight; // Sum
-            if (sameWeight && i > 0
-                    && weight != getWeight(invokers.get(i - 1), invocation)) {
+            // save for later use
+            weights[i] = weight;
+            // Sum
+            totalWeight += weight;
+            if (sameWeight && weight != firstWeight) {
                 sameWeight = false;
             }
         }
         if (totalWeight > 0 && !sameWeight) {
             // If (not every invoker has the same weight & at least one invoker's weight>0), select randomly based on totalWeight.
-            int offset = random.nextInt(totalWeight);
+            int offset = ThreadLocalRandom.current().nextInt(totalWeight);
             // Return a invoker based on the random value.
             for (int i = 0; i < length; i++) {
-                offset -= getWeight(invokers.get(i), invocation);
+                offset -= weights[i];
                 if (offset < 0) {
                     return invokers.get(i);
                 }
             }
         }
         // If all invokers have the same weight value or totalWeight=0, return evenly.
-        return invokers.get(random.nextInt(length));
+        return invokers.get(ThreadLocalRandom.current().nextInt(length));
     }
 
 }

@@ -16,21 +16,48 @@
  */
 package org.apache.dubbo.common.serialize.support;
 
-import java.util.LinkedHashSet;
-import java.util.Set;
+import com.esotericsoftware.kryo.Serializer;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * Provide a unified serialization registry, this class used for {@code dubbo-serialization-fst}
+ * and {@code dubbo-serialization-kryo}, it will register some classes at startup time (for example {@link AbstractKryoFactory#create})
+ */
 public abstract class SerializableClassRegistry {
 
-    private static final Set<Class> registrations = new LinkedHashSet<Class>();
+
+    private static final Map<Class, Object> registrations = new LinkedHashMap<>();
 
     /**
      * only supposed to be called at startup time
+     *
+     * @param clazz object type
      */
     public static void registerClass(Class clazz) {
-        registrations.add(clazz);
+        registerClass(clazz, null);
     }
 
-    public static Set<Class> getRegisteredClasses() {
+    /**
+     * only supposed to be called at startup time
+     *
+     * @param clazz object type
+     * @param serializer object serializer
+     */
+    public static void registerClass(Class clazz, Serializer serializer) {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Class registered to kryo cannot be null!");
+        }
+        registrations.put(clazz, serializer);
+    }
+
+    /**
+     * get registered classes
+     *
+     * @return class serializer
+     * */
+    public static Map<Class, Object> getRegisteredClasses() {
         return registrations;
     }
 }

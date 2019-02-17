@@ -16,7 +16,10 @@
  */
 package org.apache.dubbo.common.utils;
 
+
 import java.lang.reflect.Array;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -44,6 +47,8 @@ public class ClassHelper {
      * as value, for example: Integer.class -> int.class.
      */
     private static final Map<Class<?>, Class<?>> primitiveWrapperTypeMap = new HashMap<Class<?>, Class<?>>(8);
+
+    private static final char PACKAGE_SEPARATOR_CHAR = '.';
 
     static {
         primitiveWrapperTypeMap.put(Boolean.class, boolean.class);
@@ -83,10 +88,10 @@ public class ClassHelper {
     /**
      * get class loader
      *
-     * @param cls
+     * @param clazz
      * @return class loader
      */
-    public static ClassLoader getClassLoader(Class<?> cls) {
+    public static ClassLoader getClassLoader(Class<?> clazz) {
         ClassLoader cl = null;
         try {
             cl = Thread.currentThread().getContextClassLoader();
@@ -95,8 +100,17 @@ public class ClassHelper {
         }
         if (cl == null) {
             // No thread context class loader -> use class loader of this class.
-            cl = cls.getClassLoader();
+            cl = clazz.getClassLoader();
+            if (cl == null) {
+                // getClassLoader() returning null indicates the bootstrap ClassLoader
+                try {
+                    cl = ClassLoader.getSystemClassLoader();
+                } catch (Throwable ex) {
+                    // Cannot access system ClassLoader - oh well, maybe the caller can live with null...
+                }
+            }
         }
+
         return cl;
     }
 
@@ -204,5 +218,93 @@ public class ClassHelper {
         }
         return obj.getClass().getSimpleName() + "@" + System.identityHashCode(obj);
 
+    }
+
+    public static String simpleClassName(Class<?> clazz) {
+        if (clazz == null) {
+            throw new NullPointerException("clazz");
+        }
+        String className = clazz.getName();
+        final int lastDotIdx = className.lastIndexOf(PACKAGE_SEPARATOR_CHAR);
+        if (lastDotIdx > -1) {
+            return className.substring(lastDotIdx + 1);
+        }
+        return className;
+    }
+
+    public static boolean isSetter(Method method) {
+        return method.getName().startsWith("set")
+                && !"set".equals(method.getName())
+                && Modifier.isPublic(method.getModifiers())
+                && method.getParameterCount() == 1
+                && isPrimitive(method.getParameterTypes()[0]);
+    }
+
+    public static boolean isGetter(Method method) {
+        String name = method.getName();
+        return (name.startsWith("get") || name.startsWith("is"))
+                && !"get".equals(name) && !"is".equals(name)
+                && !"getClass".equals(name) && !"getObject".equals(name)
+                && Modifier.isPublic(method.getModifiers())
+                && method.getParameterTypes().length == 0
+                && isPrimitive(method.getReturnType());
+    }
+
+    public static boolean isPrimitive(Class<?> type) {
+        return type.isPrimitive()
+                || type == String.class
+                || type == Character.class
+                || type == Boolean.class
+                || type == Byte.class
+                || type == Short.class
+                || type == Integer.class
+                || type == Long.class
+                || type == Float.class
+                || type == Double.class
+                || type == Object.class;
+    }
+
+    public static Object convertPrimitive(Class<?> type, String value) {
+        if (value == null) {
+            return null;
+        } else if (type == char.class || type == Character.class) {
+            return value.length() > 0 ? value.charAt(0) : '\0';
+        } else if (type == boolean.class || type == Boolean.class) {
+            return Boolean.valueOf(value);
+        }
+        try {
+            if (type == byte.class || type == Byte.class) {
+                return Byte.valueOf(value);
+            } else if (type == short.class || type == Short.class) {
+                return Short.valueOf(value);
+            } else if (type == int.class || type == Integer.class) {
+                return Integer.valueOf(value);
+            } else if (type == long.class || type == Long.class) {
+                return Long.valueOf(value);
+            } else if (type == float.class || type == Float.class) {
+                return Float.valueOf(value);
+            } else if (type == double.class || type == Double.class) {
+                return Double.valueOf(value);
+            }
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        return value;
+    }
+
+
+    /**
+     * We only check boolean value at this moment.
+     *
+     * @param type
+     * @param value
+     * @return
+     */
+    public static boolean isTypeMatch(Class<?> type, String value) {
+        if ((type == boolean.class || type == Boolean.class)
+                && !("true".equals(value) || "false".equals(value))) {
+            return false;
+        }
+        return true;
     }
 }
